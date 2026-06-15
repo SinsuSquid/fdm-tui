@@ -16,6 +16,12 @@ A fullscreen, split-pane terminal reader for Fandom.com wikis, built in Go using
 
 ---
 
+## 📸 Demo Preview (Wookieepedia)
+
+![Wookieepedia Screenshot - 2026-06-15](resources/Screenshot.png)
+
+---
+
 ## 🕵️ Motivation (Stealth Mode)
 
 Designed specifically to bypass your boss's line of sight. Looking at gaming wikis in a web browser is a major red flag, but reading structured text blocks in a fullscreen terminal environment looks exactly like you are debugging databases, monitoring server telemetry, or compiling backend code. Read your favorite lore undetected!
