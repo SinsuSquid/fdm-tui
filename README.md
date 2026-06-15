@@ -10,9 +10,15 @@
 
 A fullscreen, split-pane terminal reader for Fandom.com wikis, built in Go using the **Bubble Tea** and **Lip Gloss** frameworks.
 
-![Dynamic Themes](https://img.shields.io/badge/Themes-Dynamic-brightgreen)
+![Themes](https://img.shields.io/badge/Themes-Dynamic-brightgreen)
 ![Mouse Support](https://img.shields.io/badge/Mouse-Enabled-blue)
 ![Vim Keybinds](https://img.shields.io/badge/Keybinds-Vim--style-orange)
+
+---
+
+## 🕵️ Motivation (Stealth Mode)
+
+Designed specifically to bypass your boss's line of sight. Looking at gaming wikis in a web browser is a major red flag, but reading structured text blocks in a fullscreen terminal environment looks exactly like you are debugging databases, monitoring server telemetry, or compiling backend code. Read your favorite lore undetected!
 
 ---
 
