@@ -132,7 +132,7 @@ func initialModel() model {
 	si.Placeholder = "Search articles..."
 	si.Prompt = " 🔍 "
 	si.CharLimit = 100
-	si.Width = 25
+	si.Width = 20
 
 	fi := textinput.New()
 	fi.Placeholder = "#"
@@ -673,7 +673,7 @@ func (m model) View() string {
 					}
 				}
 				
-				maxTextLen := 28 - 3
+				maxTextLen := 30 - 4
 				truncatedText := truncate(res.Title, maxTextLen)
 				
 				leftContent += fmt.Sprintf("%s %s\n", cursorStr, style.Render(truncatedText))
@@ -683,9 +683,9 @@ func (m model) View() string {
 		}
 
 		if m.focus == focusSearch || m.focus == focusList {
-			leftView = borderActive.Width(28).Height(innerContentHeight).Render(leftContent)
+			leftView = borderActive.Width(30).Height(innerContentHeight).Render(leftContent)
 		} else {
-			leftView = borderInactive.Width(28).Height(innerContentHeight).Render(leftContent)
+			leftView = borderInactive.Width(30).Height(innerContentHeight).Render(leftContent)
 		}
 	}
 

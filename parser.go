@@ -165,6 +165,18 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 		return fmt.Sprintf("\n\n%s\n\n", quoteStyle.Render(cleanText))
 	})
 
+	// Citation/reference tags <sup> (like [1])
+	supRegex := regexp.MustCompile(`(?i)<sup[^>]*>(.*?)</sup>`)
+	supStyle := lipgloss.NewStyle().Foreground(themeColor)
+	h = supRegex.ReplaceAllStringFunc(h, func(match string) string {
+		sub := supRegex.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		cleanText := stripHTML(sub[1])
+		return supStyle.Render(html.UnescapeString(cleanText))
+	})
+
 	// 5. Stylize Headers with customized lipgloss rules and underlines
 	h1Regex := regexp.MustCompile(`(?i)<h[1-3][^>]*>(.*?)</h[1-3]>`)
 	h1Style := lipgloss.NewStyle().Bold(true).Foreground(themeColor)
