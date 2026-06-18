@@ -31,4 +31,9 @@ go.work.sum
 # .idea/
 # .vscode/
 .github/copilot_instructions.md
+<<<<<<< HEAD
 .gitignore
+||||||| parent of 4251ccb (Edited .gitignore)
+=======
+fdm-tui
+>>>>>>> 4251ccb (Edited .gitignore)
