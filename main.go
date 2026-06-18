@@ -31,10 +31,12 @@ const (
 type searchResultMsg []SearchResult
 type errMsg error
 type articleContentMsg struct {
+	Title string
 	Text  string
 	Links []ArticleLink
 }
 type wikiLandingMsg struct {
+	Title      string
 	ThemeColor lipgloss.Color
 	Text       string
 	Links      []ArticleLink
@@ -57,7 +59,7 @@ func fetchArticleCmd(wiki, title string, themeColor lipgloss.Color) tea.Cmd {
 			return errMsg(err)
 		}
 		cleaned, links := CleanHTML(html, themeColor)
-		return articleContentMsg{Text: cleaned, Links: links}
+		return articleContentMsg{Title: title, Text: cleaned, Links: links}
 	}
 }
 
@@ -80,6 +82,7 @@ func fetchWikiLandingCmd(wiki string) tea.Cmd {
 		html, err := FetchArticleContent(wiki, mainPage)
 		if err != nil {
 			return wikiLandingMsg{
+				Title:      mainPage,
 				ThemeColor: themeColor,
 				Text:       fmt.Sprintf("Welcome to the %s wiki!\n\nUse the sidebar search input (🔍) to find articles.", wiki),
 				Links:      nil,
@@ -88,6 +91,7 @@ func fetchWikiLandingCmd(wiki string) tea.Cmd {
 
 		cleaned, links := CleanHTML(html, themeColor)
 		return wikiLandingMsg{
+			Title:      mainPage,
 			ThemeColor: themeColor,
 			Text:       cleaned,
 			Links:      links,
@@ -110,6 +114,10 @@ type model struct {
 	themeColor    lipgloss.Color
 	hideSidebar   bool
 	
+	// Navigation history
+	currentTitle  string
+	history       []string
+
 	// Search state
 	searchResults []SearchResult
 	cursor        int // selected search result
@@ -153,6 +161,15 @@ func initialModel() model {
 		themeColor:  lipgloss.Color("#A855F7"),
 		hideSidebar: false,
 	}
+}
+
+func (m *model) loadArticle(title string, pushToHistory bool) tea.Cmd {
+	if pushToHistory && m.currentTitle != "" {
+		m.history = append(m.history, m.currentTitle)
+	}
+	m.loading = true
+	m.err = nil
+	return fetchArticleCmd(m.wiki, title, m.themeColor)
 }
 
 func getAccentColor(wiki string) lipgloss.Color {
@@ -241,10 +258,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if clickedIndex < len(m.searchResults) && !m.loading {
 							m.cursor = clickedIndex
 							m.focus = focusList
-							m.loading = true
-							m.err = nil
 							selected := m.searchResults[m.cursor].Title
-							cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
+							cmds = append(cmds, m.loadArticle(selected, true))
 						}
 					}
 				}
@@ -344,7 +359,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		
 		m.viewport.Width = rightWidth
-		m.viewport.Height = contentHeight
+		// Viewport height needs to be 2 lines less to accommodate the Reader Title Header
+		vpHeight := contentHeight - 2
+		if vpHeight < 1 {
+			vpHeight = 1
+		}
+		m.viewport.Height = vpHeight
 		
 		if m.inReaderMode {
 			wrapped := lipgloss.NewStyle().Width(rightWidth).Render(m.articleRawText)
@@ -359,6 +379,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.articleRawText = msg.Text
 		m.articleLinks = msg.Links
 		m.inReaderMode = true
+		m.currentTitle = msg.Title
+		m.history = nil // Clear history on wiki change
 		
 		wrappedWidth := m.viewport.Width
 		if wrappedWidth < 10 {
@@ -387,6 +409,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case articleContentMsg:
 		m.loading = false
 		m.articleRawText = msg.Text
+		m.currentTitle = msg.Title
 		
 		wrappedWidth := m.viewport.Width
 		if wrappedWidth < 10 {
@@ -454,10 +477,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				if len(m.searchResults) > 0 && !m.loading {
-					m.loading = true
-					m.err = nil
 					selected := m.searchResults[m.cursor].Title
-					cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
+					cmds = append(cmds, m.loadArticle(selected, true))
 				}
 			case "escape":
 				m.focus = focusSearch
@@ -468,6 +489,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case focusReader:
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			switch keyMsg.String() {
+			case "ctrl+o", "backspace":
+				if len(m.history) > 0 && !m.loading {
+					lastIdx := len(m.history) - 1
+					prevTitle := m.history[lastIdx]
+					m.history = m.history[:lastIdx]
+					cmds = append(cmds, m.loadArticle(prevTitle, false))
+					return m, tea.Batch(cmds...)
+				}
 			case "escape":
 				if !m.hideSidebar {
 					if len(m.searchResults) > 0 {
@@ -524,10 +553,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil && linkNum >= 1 && linkNum <= len(m.articleLinks) {
 					m.focus = focusReader
 					m.followInput.Blur()
-					m.loading = true
-					m.err = nil
 					selected := m.articleLinks[linkNum-1].Target
-					cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
+					cmds = append(cmds, m.loadArticle(selected, true))
 				} else {
 					m.followInput.Reset()
 				}
@@ -689,14 +716,53 @@ func (m model) View() string {
 		}
 	}
 
+	// Reader Header with status/scroll indicators
+	readerTitle := m.currentTitle
+	if readerTitle == "" {
+		readerTitle = "Welcome"
+	}
+	percent := int(m.viewport.ScrollPercent() * 100)
+	var scrollText string
+	if percent >= 100 {
+		scrollText = "BOT"
+	} else if percent <= 0 {
+		scrollText = "TOP"
+	} else {
+		scrollText = fmt.Sprintf("%d%%", percent)
+	}
+
+	histIndicator := ""
+	if len(m.history) > 0 {
+		histIndicator = fmt.Sprintf(" (← Back: %d)", len(m.history))
+	}
+
+	titleLabel := lipgloss.NewStyle().Foreground(themeColor).Bold(true).Render(readerTitle)
+	scrollLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render(scrollText)
+	backLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#A6E3A1")).Render(histIndicator)
+
+	rightHeader := fmt.Sprintf(" 📖 %s%s", titleLabel, backLabel)
+	// Right align the scroll percentage
+	paddingSpaces := m.viewport.Width - lipgloss.Width(rightHeader) - lipgloss.Width(scrollLabel) - 2
+	if paddingSpaces > 0 {
+		rightHeader += strings.Repeat(" ", paddingSpaces) + scrollLabel
+	} else {
+		rightHeader += " | " + scrollLabel
+	}
+
+	separator := lipgloss.NewStyle().Foreground(lipgloss.Color("#313244")).Render(strings.Repeat("─", m.viewport.Width))
+
+	rightContent := lipgloss.JoinVertical(lipgloss.Left,
+		rightHeader,
+		separator,
+		m.viewport.View(),
+	)
+
 	// Right Pane (Reader)
 	var rightView string
-	rightContent := m.viewport.View()
-	
 	if m.focus == focusReader {
-		rightView = borderActive.Width(m.viewport.Width).Height(m.viewport.Height).Render(rightContent)
+		rightView = borderActive.Width(m.viewport.Width).Height(innerContentHeight).Render(rightContent)
 	} else {
-		rightView = borderInactive.Width(m.viewport.Width).Height(m.viewport.Height).Render(rightContent)
+		rightView = borderInactive.Width(m.viewport.Width).Height(innerContentHeight).Render(rightContent)
 	}
 
 	// Assemble Body
@@ -715,10 +781,14 @@ func (m model) View() string {
 	case focusList:
 		helpText = "j/k or Up/Down: Navigate Results • Enter: Open • Esc: Edit Search • Ctrl+B: Hide Sidebar • Tab: Move Focus • Ctrl+C: Quit"
 	case focusReader:
+		backStr := ""
+		if len(m.history) > 0 {
+			backStr = " • Backspace/Ctrl+O: Go Back"
+		}
 		if m.hideSidebar {
-			helpText = "j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • Ctrl+B: Show Sidebar • Ctrl+C: Quit"
+			helpText = "j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link" + backStr + " • Ctrl+B: Show Sidebar • Ctrl+C: Quit"
 		} else {
-			helpText = "j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • Esc: Search Results • Ctrl+B: Hide Sidebar • Tab: Move Focus • Ctrl+C: Quit"
+			helpText = "j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link" + backStr + " • Esc: Search Results • Ctrl+B: Hide Sidebar • Tab: Move Focus • Ctrl+C: Quit"
 		}
 	case focusFollow:
 		helpText = m.followInput.View() + " [Enter: Go to article • Esc: Cancel]"
