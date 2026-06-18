@@ -133,7 +133,7 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 	})
 
 	// Italic tags <i> / <em>
-	italicRegex := regexp.MustCompile(`(?i)<typeof|em|i)[^>]*>(.*?)</(?:em|i)>`)
+	italicRegex := regexp.MustCompile(`(?i)<(?:em|i)[^>]*>(.*?)</(?:em|i)>`)
 	italicStyle := lipgloss.NewStyle().Italic(true)
 	h = italicRegex.ReplaceAllStringFunc(h, func(match string) string {
 		sub := italicRegex.FindStringSubmatch(match)
