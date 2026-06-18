@@ -64,7 +64,7 @@ func stripHTML(s string) string {
 // and extracts all internal links.
 func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink) {
 	// 1. Remove comments
-	commentRegex := regexp.MustCompile(`(?s)<!--.*?-->`)
+	commentRegex := regexp.MustCompile(`(?s)`)
 	h := commentRegex.ReplaceAllString(rawHTML, "")
 
 	// 2. Remove discarded tags and their contents
@@ -133,7 +133,7 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 	})
 
 	// Italic tags <i> / <em>
-	italicRegex := regexp.MustCompile(`(?i)<(?:em|i)[^>]*>(.*?)</(?:em|i)>`)
+	italicRegex := regexp.MustCompile(`(?i)<typeof|em|i)[^>]*>(.*?)</(?:em|i)>`)
 	italicStyle := lipgloss.NewStyle().Italic(true)
 	h = italicRegex.ReplaceAllStringFunc(h, func(match string) string {
 		sub := italicRegex.FindStringSubmatch(match)
@@ -144,8 +144,6 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 		return italicStyle.Render(html.UnescapeString(cleanText))
 	})
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 	// Blockquotes <blockquote>
 	quoteRegex := regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`)
 	h = quoteRegex.ReplaceAllStringFunc(h, func(match string) string {
@@ -181,58 +179,6 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 
 	// 5. Stylize Headers with customized lipgloss rules and underlines
 	h1Regex := regexp.MustCompile(`(?i)<h[1-3][^>]*>(.*?)</h[1-3]>`)
-||||||| parent of 1e21417 (feat:native HTML parser, UX upgrade, History navigation added.)
-	// Blockquotes <blockquote>
-	quoteRegex := regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`)
-	h = quoteRegex.ReplaceAllStringFunc(h, func(match string) string {
-		sub := quoteRegex.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-		cleanText := stripHTML(sub[1])
-		cleanText = html.UnescapeString(strings.TrimSpace(cleanText))
-		
-		quoteStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9399B2")).
-			Italic(true).
-			BorderLeft(true).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(themeColor).
-			PaddingLeft(2)
-			
-		return fmt.Sprintf("\n\n%s\n\n", quoteStyle.Render(cleanText))
-	})
-
-	// 5. Stylize Headers with customized lipgloss rules and underlines
-	h1Regex := regexp.MustCompile(`(?i)<h[1-3][^>]*>(.*?)</h[1-3]>`)
-=======
->>>>>>> 1e21417 (feat:native HTML parser, UX upgrade, History navigation added.)
-||||||| parent of 1753327 (Revert "feat:native HTML parser, UX upgrade, History navigation added.")
-=======
-	// Blockquotes <blockquote>
-	quoteRegex := regexp.MustCompile(`(?i)<blockquote[^>]*>(.*?)</blockquote>`)
-	h = quoteRegex.ReplaceAllStringFunc(h, func(match string) string {
-		sub := quoteRegex.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-		cleanText := stripHTML(sub[1])
-		cleanText = html.UnescapeString(strings.TrimSpace(cleanText))
-		
-		quoteStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9399B2")).
-			Italic(true).
-			BorderLeft(true).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(themeColor).
-			PaddingLeft(2)
-			
-		return fmt.Sprintf("\n\n%s\n\n", quoteStyle.Render(cleanText))
-	})
-
-	// 5. Stylize Headers with customized lipgloss rules and underlines
-	h1Regex := regexp.MustCompile(`(?i)<h[1-3][^>]*>(.*?)</h[1-3]>`)
->>>>>>> 1753327 (Revert "feat:native HTML parser, UX upgrade, History navigation added.")
 	h1Style := lipgloss.NewStyle().Bold(true).Foreground(themeColor)
 	h = h1Regex.ReplaceAllStringFunc(h, func(match string) string {
 		sub := h1Regex.FindStringSubmatch(match)
