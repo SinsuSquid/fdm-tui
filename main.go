@@ -181,7 +181,7 @@ func fetchSixelImageCmd(imageURL string, width, height int) tea.Cmd {
 func clearKittyGraphicsCmd() tea.Cmd {
 	return func() tea.Msg {
 		if isKittyTerminal() {
-			os.Stdout.Write([]byte("\x1b_Ga=d,d=a\x1b\\"))
+			os.Stdout.Write([]byte("\x1b_Ga=d,d=A\x1b\\"))
 		}
 		return nil
 	}

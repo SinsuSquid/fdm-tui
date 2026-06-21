@@ -264,7 +264,7 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 
 	var result strings.Builder
 	// Clear all previous Kitty graphics from the terminal screen
-	result.WriteString("\x1b_Ga=d,d=a\x1b\\")
+	result.WriteString("\x1b_Ga=d,d=A\x1b\\")
 	chunkSize := 4096
 	totalLen := len(encoded)
 
