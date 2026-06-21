@@ -31,9 +31,11 @@ Designed specifically to bypass your boss's line of sight. Looking at gaming wik
 ## ✨ Features
 
 - **Dynamic Accent Themes**: The interface automatically fetches the wiki's logo, analyzes its pixels, and shifts the color scheme in real-time to match the community's visual identity.
-- **Lynx-style Link Navigation**: Links in articles are highlighted, numbered (`[1]`, `[2]`), and searchable. Press `f` to jump between pages using only your keyboard.
+- **Vimium-style Link Hinting**: Links in articles are labeled with alphabetical hints (e.g. `[a]`, `[b]`, `[as]`). Press `f` to activate the hinting prompt, then type the letters to jump directly between pages without needing the mouse.
+- **Article Navigation History**: Remembers your reading path. Press `Ctrl+O`, `Backspace`, or `H` while in the reader to jump back to previously viewed articles.
+- **Article Outline (Table of Contents)**: Automatically extracts article sections and lists them in a dedicated outline view. Press `Ctrl+T` to switch the sidebar tab and scroll straight to a section by selecting it.
 - **Vim Navigation**: Full support for `j`/`k` (scroll), `d`/`u` (half-page), and `g`/`G` (top/bottom) keybindings.
-- **Mouse & Scroll Wheel**: Click sidebar items to navigate, and use your mouse scroll wheel directly inside the terminal to scroll articles.
+- **Mouse & Scroll Wheel**: Click sidebar items or outline sections to navigate, and use your mouse scroll wheel directly inside the terminal to scroll articles.
 - **AltScreen Buffer**: Runs in fullscreen alternate screen buffer mode (doesn't clutter your terminal history).
 - **Responsive Layout**: Adjusts layouts, pane widths, and text word-wrapping automatically as you resize your terminal.
 - **Collapsible Sidebar**: Toggle the sidebar view (`Ctrl+B`) for distraction-free, full-width reading.
@@ -68,23 +70,30 @@ go build -o fdm-tui
 - `Ctrl+C`: Quit the application.
 
 ### Main Dashboard (General)
-- `Tab`: Cycle focus between the **Search Input**, **Search Results**, and **Article Reader**.
+- `Tab`: Cycle focus between active sidebar element and the Article Reader.
 - `Ctrl+B`: Toggle (Show/Hide) the left sidebar.
+- `Ctrl+T`: Toggle sidebar tab (Search vs Article Outline).
 - `Ctrl+W`: Return to the Welcome Screen to change the active Wiki.
 - `Ctrl+C`: Quit the application.
 
 ### Sidebar (Search Results List)
 - `j` / `k` or `Up` / `Down`: Move selection cursor.
 - `Enter`: Fetch and open the selected article in the reader.
-- `Esc`: Clear focus back to the search bar.
+- `Esc`: Focus search input box.
+
+### Sidebar (Article Outline)
+- `j` / `k` or `Up` / `Down`: Move selection cursor.
+- `Enter`: Scroll the article reader to the selected header.
+- `Esc`: Focus search input box.
 
 ### Article Reader
 - `j` / `k` or `Up` / `Down`: Scroll article line-by-line.
 - `d` / `u` or `Ctrl+D` / `Ctrl+U`: Scroll half-page down/up.
 - `Space` / `b`: Scroll page down/up.
 - `g` / `G`: Jump to the top / bottom of the page.
-- `f`: Open the prompt at the bottom (`Follow link #: [ ]`) to jump directly to a numbered link on the page.
-- `Esc`: Move focus back to the search results list.
+- `f`: Open the prompt at the bottom (`Follow link (letters): [ ]`) to jump directly to a lettered link on the page.
+- `Ctrl+O` / `Backspace` / `H`: Navigate back to the previous article in history.
+- `Esc`: Move focus back to the active sidebar pane.
 
 ---
 
