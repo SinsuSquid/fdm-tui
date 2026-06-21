@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -23,21 +24,32 @@ type focusState int
 const (
 	focusSearch focusState = iota
 	focusList
+	focusOutline
 	focusReader
 	focusFollow
+)
+
+type sidebarTabState int
+
+const (
+	tabSearch sidebarTabState = iota
+	tabOutline
 )
 
 // Msg types for async operations
 type searchResultMsg []SearchResult
 type errMsg error
 type articleContentMsg struct {
-	Text  string
-	Links []ArticleLink
+	Text    string
+	Links   []ArticleLink
+	Headers []WikiHeader
 }
 type wikiLandingMsg struct {
 	ThemeColor lipgloss.Color
 	Text       string
 	Links      []ArticleLink
+	Headers    []WikiHeader
+	Title      string
 }
 
 func searchArticlesCmd(wiki, query string) tea.Cmd {
@@ -56,8 +68,8 @@ func fetchArticleCmd(wiki, title string, themeColor lipgloss.Color) tea.Cmd {
 		if err != nil {
 			return errMsg(err)
 		}
-		cleaned, links := CleanHTML(html, themeColor)
-		return articleContentMsg{Text: cleaned, Links: links}
+		cleaned, links, headers := CleanHTML(html, themeColor)
+		return articleContentMsg{Text: cleaned, Links: links, Headers: headers}
 	}
 }
 
@@ -83,14 +95,18 @@ func fetchWikiLandingCmd(wiki string) tea.Cmd {
 				ThemeColor: themeColor,
 				Text:       fmt.Sprintf("Welcome to the %s wiki!\n\nUse the sidebar search input (🔍) to find articles.", wiki),
 				Links:      nil,
+				Headers:    nil,
+				Title:      "Main Page",
 			}
 		}
 
-		cleaned, links := CleanHTML(html, themeColor)
+		cleaned, links, headers := CleanHTML(html, themeColor)
 		return wikiLandingMsg{
 			ThemeColor: themeColor,
 			Text:       cleaned,
 			Links:      links,
+			Headers:    headers,
+			Title:      mainPage,
 		}
 	}
 }
@@ -118,6 +134,15 @@ type model struct {
 	articleRawText string // Holds the unwrapped parsed text for dynamic re-wrapping
 	articleLinks   []ArticleLink
 	inReaderMode   bool
+
+	// Headers / Outline state
+	headers       []WikiHeader
+	outlineCursor int
+	sidebarTab    sidebarTabState
+
+	// History stack
+	history      []string
+	currentTitle string
 }
 
 func initialModel() model {
@@ -135,10 +160,10 @@ func initialModel() model {
 	si.Width = 20
 
 	fi := textinput.New()
-	fi.Placeholder = "#"
-	fi.Prompt = " Follow link #: "
+	fi.Placeholder = "asdf"
+	fi.Prompt = " Follow link (letters): "
 	fi.CharLimit = 5
-	fi.Width = 10
+	fi.Width = 12
 
 	vp := viewport.New(80, 20)
 
@@ -152,6 +177,7 @@ func initialModel() model {
 		focus:       focusSearch,
 		themeColor:  lipgloss.Color("#A855F7"),
 		hideSidebar: false,
+		sidebarTab:  tabSearch,
 	}
 }
 
@@ -235,16 +261,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if msg.Type == tea.MouseRelease && msg.Button == tea.MouseButtonLeft {
 				if !m.hideSidebar && msg.X >= 1 && msg.X <= 31 {
-					// Y = 11 is the start of the list items
-					clickedIndex := msg.Y - 11
-					if clickedIndex >= 0 {
-						if clickedIndex < len(m.searchResults) && !m.loading {
+					if m.sidebarTab == tabSearch {
+						// Search results list starts at terminal line 13
+						clickedIndex := msg.Y - 13
+						if clickedIndex >= 0 && clickedIndex < len(m.searchResults) && !m.loading {
 							m.cursor = clickedIndex
 							m.focus = focusList
 							m.loading = true
 							m.err = nil
 							selected := m.searchResults[m.cursor].Title
+							if m.currentTitle != "" {
+								m.history = append(m.history, m.currentTitle)
+							}
+							m.currentTitle = selected
 							cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
+						}
+					} else {
+						// Outline list starts at terminal line 11
+						clickedIndex := msg.Y - 11
+						if clickedIndex >= 0 && clickedIndex < len(m.headers) {
+							m.outlineCursor = clickedIndex
+							m.focus = focusOutline
+							
+							headerText := m.headers[m.outlineCursor].Text
+							wrappedWidth := m.viewport.Width
+							if wrappedWidth < 10 {
+								wrappedWidth = 10
+							}
+							wrapped := lipgloss.NewStyle().Width(wrappedWidth).Render(m.articleRawText)
+							lines := strings.Split(wrapped, "\n")
+							var ansiRegex = regexp.MustCompile(`\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
+							for i, line := range lines {
+								cleanLine := ansiRegex.ReplaceAllString(line, "")
+								if strings.Contains(strings.ToLower(cleanLine), strings.ToLower(headerText)) {
+									m.viewport.YOffset = i
+									break
+								}
+							}
+							m.focus = focusReader
 						}
 					}
 				}
@@ -281,6 +335,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		case "ctrl+t":
+			if m.state == stateDashboard && !m.hideSidebar {
+				if m.sidebarTab == tabSearch {
+					m.sidebarTab = tabOutline
+					m.searchInput.Blur()
+					if len(m.headers) > 0 {
+						m.focus = focusOutline
+					} else {
+						m.focus = focusReader
+					}
+				} else {
+					m.sidebarTab = tabSearch
+					m.focus = focusSearch
+					m.searchInput.Focus()
+				}
+				return m, nil
+			}
 		case "tab":
 			if m.state == stateDashboard {
 				if m.hideSidebar {
@@ -291,7 +362,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch m.focus {
 				case focusSearch:
 					m.searchInput.Blur()
-					if len(m.searchResults) > 0 {
+					if m.sidebarTab == tabOutline && len(m.headers) > 0 {
+						m.focus = focusOutline
+					} else if m.sidebarTab == tabSearch && len(m.searchResults) > 0 {
 						m.focus = focusList
 					} else if m.inReaderMode {
 						m.focus = focusReader
@@ -306,9 +379,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.focus = focusSearch
 						m.searchInput.Focus()
 					}
+				case focusOutline:
+					if m.inReaderMode {
+						m.focus = focusReader
+					} else {
+						m.focus = focusSearch
+						m.searchInput.Focus()
+					}
 				case focusReader:
-					m.focus = focusSearch
-					m.searchInput.Focus()
+					if m.sidebarTab == tabOutline && len(m.headers) > 0 {
+						m.focus = focusOutline
+					} else {
+						m.focus = focusSearch
+						m.searchInput.Focus()
+					}
 				case focusFollow:
 					m.followInput.Blur()
 					m.focus = focusReader
@@ -358,6 +442,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.themeColor = msg.ThemeColor
 		m.articleRawText = msg.Text
 		m.articleLinks = msg.Links
+		m.headers = msg.Headers
+		m.outlineCursor = 0
+		m.currentTitle = msg.Title
+		m.history = nil
 		m.inReaderMode = true
 		
 		wrappedWidth := m.viewport.Width
@@ -387,6 +475,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case articleContentMsg:
 		m.loading = false
 		m.articleRawText = msg.Text
+		m.articleLinks = msg.Links
+		m.headers = msg.Headers
+		m.outlineCursor = 0
+		m.inReaderMode = true
 		
 		wrappedWidth := m.viewport.Width
 		if wrappedWidth < 10 {
@@ -396,8 +488,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		m.viewport.SetContent(wrapped)
 		m.viewport.YOffset = 0
-		m.articleLinks = msg.Links
-		m.inReaderMode = true
 		m.focus = focusReader
 		return m, nil
 
@@ -457,7 +547,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.loading = true
 					m.err = nil
 					selected := m.searchResults[m.cursor].Title
+					if m.currentTitle != "" {
+						m.history = append(m.history, m.currentTitle)
+					}
+					m.currentTitle = selected
 					cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
+				}
+			case "escape":
+				m.focus = focusSearch
+				m.searchInput.Focus()
+			}
+		}
+
+	case focusOutline:
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "up", "k":
+				if m.outlineCursor > 0 {
+					m.outlineCursor--
+				}
+			case "down", "j":
+				if m.outlineCursor < len(m.headers)-1 {
+					m.outlineCursor++
+				}
+			case "enter":
+				if len(m.headers) > 0 {
+					headerText := m.headers[m.outlineCursor].Text
+					wrappedWidth := m.viewport.Width
+					if wrappedWidth < 10 {
+						wrappedWidth = 10
+					}
+					wrapped := lipgloss.NewStyle().Width(wrappedWidth).Render(m.articleRawText)
+					lines := strings.Split(wrapped, "\n")
+					var ansiRegex = regexp.MustCompile(`\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
+					for i, line := range lines {
+						cleanLine := ansiRegex.ReplaceAllString(line, "")
+						if strings.Contains(strings.ToLower(cleanLine), strings.ToLower(headerText)) {
+							m.viewport.YOffset = i
+							break
+						}
+					}
+					m.focus = focusReader
 				}
 			case "escape":
 				m.focus = focusSearch
@@ -470,7 +600,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch keyMsg.String() {
 			case "escape":
 				if !m.hideSidebar {
-					if len(m.searchResults) > 0 {
+					if m.sidebarTab == tabOutline && len(m.headers) > 0 {
+						m.focus = focusOutline
+					} else if len(m.searchResults) > 0 {
 						m.focus = focusList
 					} else {
 						m.focus = focusSearch
@@ -478,6 +610,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
+			case "ctrl+o", "backspace", "H":
+				if len(m.history) > 0 {
+					prevTitle := m.history[len(m.history)-1]
+					m.history = m.history[:len(m.history)-1]
+					m.currentTitle = prevTitle
+					m.loading = true
+					m.err = nil
+					cmds = append(cmds, fetchArticleCmd(m.wiki, prevTitle, m.themeColor))
+					return m, tea.Batch(cmds...)
+				}
 			case "f":
 				if m.inReaderMode && len(m.articleLinks) > 0 {
 					m.focus = focusFollow
@@ -517,19 +659,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "escape":
 				m.focus = focusReader
 				m.followInput.Blur()
-			case "enter":
-				val := m.followInput.Value()
-				var linkNum int
-				_, err := fmt.Sscanf(val, "%d", &linkNum)
-				if err == nil && linkNum >= 1 && linkNum <= len(m.articleLinks) {
-					m.focus = focusReader
-					m.followInput.Blur()
-					m.loading = true
-					m.err = nil
-					selected := m.articleLinks[linkNum-1].Target
-					cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
-				} else {
-					m.followInput.Reset()
+				return m, nil
+			}
+
+			val := strings.ToLower(m.followInput.Value())
+			if val != "" {
+				matched := false
+				for i := range m.articleLinks {
+					hint := GetHintForIndex(i + 1)
+					if val == hint {
+						matched = true
+						m.focus = focusReader
+						m.followInput.Blur()
+						m.loading = true
+						m.err = nil
+						selected := m.articleLinks[i].Target
+						if m.currentTitle != "" {
+							m.history = append(m.history, m.currentTitle)
+						}
+						m.currentTitle = selected
+						cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
+						break
+					}
+				}
+
+				if !matched {
+					anyPrefix := false
+					for i := range m.articleLinks {
+						if strings.HasPrefix(GetHintForIndex(i+1), val) {
+							anyPrefix = true
+							break
+						}
+					}
+					if !anyPrefix {
+						m.followInput.Reset()
+					}
 				}
 			}
 		}
@@ -645,44 +809,89 @@ func (m model) View() string {
 
 	innerContentHeight := m.height - 6
 
-	// Left Pane (Search + Results)
+	// Left Pane (Search + Results or Outline)
 	var leftView string
 	if !m.hideSidebar {
 		var leftContent string
 		
-		searchBoxStyle := lipgloss.NewStyle().Padding(0, 1)
-		if m.focus == focusSearch {
-			searchBoxStyle = searchBoxStyle.Border(lipgloss.NormalBorder()).BorderForeground(themeColor)
+		// Draw tabs at the top of the sidebar
+		var searchTabStr, outlineTabStr string
+		if m.sidebarTab == tabSearch {
+			searchTabStr = lipgloss.NewStyle().Foreground(themeColor).Bold(true).Underline(true).Render("1:Search")
+			outlineTabStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render("2:Outline")
 		} else {
-			searchBoxStyle = searchBoxStyle.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#45475A"))
+			searchTabStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render("1:Search")
+			outlineTabStr = lipgloss.NewStyle().Foreground(themeColor).Bold(true).Underline(true).Render("2:Outline")
 		}
-		
-		leftContent += searchBoxStyle.Render(m.searchInput.View()) + "\n"
+		tabs := lipgloss.JoinHorizontal(lipgloss.Center, " ", searchTabStr, " | ", outlineTabStr)
+		leftContent += tabs + "\n\n"
 
-		leftContent += "\nResults:\n"
-		if len(m.searchResults) > 0 {
-			for i, res := range m.searchResults {
-				cursorStr := " "
-				style := lipgloss.NewStyle()
-				if i == m.cursor {
-					cursorStr = ">"
-					if m.focus == focusList {
-						style = style.Foreground(themeColor).Bold(true)
-					} else {
-						style = style.Foreground(lipgloss.Color("#6C7086")).Italic(true)
+		if m.sidebarTab == tabSearch {
+			searchBoxStyle := lipgloss.NewStyle().Padding(0, 1)
+			if m.focus == focusSearch {
+				searchBoxStyle = searchBoxStyle.Border(lipgloss.NormalBorder()).BorderForeground(themeColor)
+			} else {
+				searchBoxStyle = searchBoxStyle.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#45475A"))
+			}
+			
+			leftContent += searchBoxStyle.Render(m.searchInput.View()) + "\n"
+
+			leftContent += "\nResults:\n"
+			if len(m.searchResults) > 0 {
+				for i, res := range m.searchResults {
+					cursorStr := " "
+					style := lipgloss.NewStyle()
+					if i == m.cursor {
+						cursorStr = ">"
+						if m.focus == focusList {
+							style = style.Foreground(themeColor).Bold(true)
+						} else {
+							style = style.Foreground(lipgloss.Color("#6C7086")).Italic(true)
+						}
 					}
+					
+					maxTextLen := 30 - 4
+					truncatedText := truncate(res.Title, maxTextLen)
+					
+					leftContent += fmt.Sprintf("%s %s\n", cursorStr, style.Render(truncatedText))
 				}
-				
-				maxTextLen := 30 - 4
-				truncatedText := truncate(res.Title, maxTextLen)
-				
-				leftContent += fmt.Sprintf("%s %s\n", cursorStr, style.Render(truncatedText))
+			} else {
+				leftContent += "\n(No results)"
 			}
 		} else {
-			leftContent += "\n(No results)"
+			leftContent += "Article Outline:\n\n"
+			if len(m.headers) > 0 {
+				for i, h := range m.headers {
+					cursorStr := " "
+					style := lipgloss.NewStyle()
+					if i == m.outlineCursor {
+						cursorStr = ">"
+						if m.focus == focusOutline {
+							style = style.Foreground(themeColor).Bold(true)
+						} else {
+							style = style.Foreground(lipgloss.Color("#6C7086")).Italic(true)
+						}
+					}
+					
+					indentLen := h.Level - 1
+					if indentLen < 0 {
+						indentLen = 0
+					}
+					if indentLen > 3 {
+						indentLen = 3
+					}
+					indent := strings.Repeat("  ", indentLen)
+					maxTextLen := 30 - 4 - len(indent)
+					truncatedText := truncate(h.Text, maxTextLen)
+					
+					leftContent += fmt.Sprintf("%s %s%s\n", cursorStr, indent, style.Render(truncatedText))
+				}
+			} else {
+				leftContent += "\n(No headers found)"
+			}
 		}
 
-		if m.focus == focusSearch || m.focus == focusList {
+		if m.focus == focusSearch || m.focus == focusList || m.focus == focusOutline {
 			leftView = borderActive.Width(30).Height(innerContentHeight).Render(leftContent)
 		} else {
 			leftView = borderInactive.Width(30).Height(innerContentHeight).Render(leftContent)
@@ -711,17 +920,23 @@ func (m model) View() string {
 	var helpText string
 	switch m.focus {
 	case focusSearch:
-		helpText = "Enter: Search Wiki • Ctrl+B: Show Sidebar • Ctrl+W: Change Wiki • Tab: Move Focus • Ctrl+C: Quit"
+		helpText = "Enter: Search Wiki • Ctrl+T: Toggle Tab • Ctrl+B: Toggle Sidebar • Ctrl+W: Change Wiki • Tab: Focus Reader • Ctrl+C: Quit"
 	case focusList:
-		helpText = "j/k or Up/Down: Navigate Results • Enter: Open • Esc: Edit Search • Ctrl+B: Hide Sidebar • Tab: Move Focus • Ctrl+C: Quit"
+		helpText = "j/k: Navigate • Enter: Open • Esc: Search Bar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Reader"
+	case focusOutline:
+		helpText = "j/k: Navigate • Enter: Scroll To • Esc: Search Bar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Reader"
 	case focusReader:
+		backHelp := ""
+		if len(m.history) > 0 {
+			backHelp = "Ctrl+O: Back • "
+		}
 		if m.hideSidebar {
-			helpText = "j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • Ctrl+B: Show Sidebar • Ctrl+C: Quit"
+			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %sCtrl+B: Show Sidebar • Ctrl+C: Quit", backHelp)
 		} else {
-			helpText = "j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • Esc: Search Results • Ctrl+B: Hide Sidebar • Tab: Move Focus • Ctrl+C: Quit"
+			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %sEsc: Sidebar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Sidebar", backHelp)
 		}
 	case focusFollow:
-		helpText = m.followInput.View() + " [Enter: Go to article • Esc: Cancel]"
+		helpText = m.followInput.View() + " [Esc: Cancel]"
 	}
 	footer := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6C7086")).

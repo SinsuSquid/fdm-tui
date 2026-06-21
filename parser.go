@@ -60,9 +60,55 @@ func stripHTML(s string) string {
 	return builder.String()
 }
 
+// GetHintForIndex converts a 1-based index into a Vimium-style letter hint.
+func GetHintForIndex(index int) string {
+	chars := "asdfghjklqwertyuiopzxcvbnm"
+	if index <= len(chars) {
+		return string(chars[index-1])
+	}
+	first := (index - 1) / len(chars)
+	second := (index - 1) % len(chars)
+	if first <= len(chars) {
+		return string(chars[first-1]) + string(chars[second])
+	}
+	return fmt.Sprintf("%d", index)
+}
+
+// WikiHeader represents a parsed header section in the article.
+type WikiHeader struct {
+	Text  string
+	Level int
+}
+
+func extractHeaders(rawHTML string) []WikiHeader {
+	var headers []WikiHeader
+	headerRegex := regexp.MustCompile(`(?i)<(h[1-6])[^>]*>(.*?)</h[1-6]>`)
+	matches := headerRegex.FindAllStringSubmatch(rawHTML, -1)
+	for _, m := range matches {
+		if len(m) < 3 {
+			continue
+		}
+		tag := strings.ToLower(m[1])
+		level := int(tag[1] - '0')
+		text := stripHTML(m[2])
+		text = html.UnescapeString(strings.TrimSpace(text))
+		if text == "" || len(text) > 100 {
+			continue
+		}
+		headers = append(headers, WikiHeader{
+			Text:  text,
+			Level: level,
+		})
+	}
+	return headers
+}
+
 // CleanHTML converts raw wiki HTML into readable plaintext formatted for the terminal,
-// and extracts all internal links.
-func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink) {
+// extracts all internal links, and extracts header outlines.
+func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink, []WikiHeader) {
+	// Extract outline headers before modifying HTML
+	headers := extractHeaders(rawHTML)
+
 	// 1. Remove comments
 	commentRegex := regexp.MustCompile(`(?s)`)
 	h := commentRegex.ReplaceAllString(rawHTML, "")
@@ -114,7 +160,8 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 			linkIndex = len(links)
 		}
 		
-		indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).SetString(fmt.Sprintf("[%d]", linkIndex))
+		hint := GetHintForIndex(linkIndex)
+		indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).SetString(fmt.Sprintf("[%s]", hint))
 		return fmt.Sprintf("%s%s", linkStyle.Render(linkText), indexStyle.Render())
 	})
 
@@ -231,5 +278,5 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 		}
 	}
 
-	return strings.TrimSpace(strings.Join(cleanedLines, "\n")), links
+	return strings.TrimSpace(strings.Join(cleanedLines, "\n")), links, headers
 }
