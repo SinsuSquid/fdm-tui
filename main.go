@@ -297,8 +297,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.state == stateDashboard {
 			if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-				m.viewport, cmd = m.viewport.Update(msg)
-				return m, cmd
+				if m.focus != focusGallery {
+					m.viewport, cmd = m.viewport.Update(msg)
+					return m, cmd
+				}
 			}
 
 			if msg.Type == tea.MouseRelease && msg.Button == tea.MouseButtonLeft {
