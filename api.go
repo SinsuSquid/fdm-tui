@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	_ "golang.org/x/image/webp"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"strings"
+	"github.com/mattn/go-sixel"
 )
 
 // SearchResult represents a single search result from Fandom/MediaWiki
@@ -201,4 +205,120 @@ func FetchDominantColor(logoURL string) (string, error) {
 	}
 
 	return dominantHex, nil
+}
+
+func resizeImage(img image.Image, width, height int) image.Image {
+	minX := img.Bounds().Min.X
+	minY := img.Bounds().Min.Y
+	maxX := img.Bounds().Max.X
+	maxY := img.Bounds().Max.Y
+	
+	oldWidth := maxX - minX
+	oldHeight := maxY - minY
+	
+	newImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			origX := minX + (x * oldWidth / width)
+			origY := minY + (y * oldHeight / height)
+			newImg.Set(x, y, img.At(origX, origY))
+		}
+	}
+	return newImg
+}
+
+// FetchSixelLogo downloads the logo and encodes it to Sixel format, padded with newlines to reserve TUI layout rows.
+func FetchSixelLogo(logoURL string) (string, error) {
+	resp, err := http.Get(logoURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download logo: %d", resp.StatusCode)
+	}
+
+	img, _, err := image.Decode(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	bounds := img.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return "", fmt.Errorf("invalid image dimensions")
+	}
+
+	// Fit inside sidebar pane (typically 30 chars wide, let's use 24 chars max)
+	// Assume 1 cell = 8x16 pixels
+	charWidth := 24
+	pixelWidth := charWidth * 8
+	pixelHeight := (h * pixelWidth) / w
+	
+	// Limit height so it doesn't occupy too much space
+	if pixelHeight > 96 {
+		pixelHeight = 96
+		pixelWidth = (w * pixelHeight) / h
+	}
+
+	resized := resizeImage(img, pixelWidth, pixelHeight)
+
+	var buf bytes.Buffer
+	enc := sixel.NewEncoder(&buf)
+	err = enc.Encode(resized)
+	if err != nil {
+		return "", err
+	}
+
+	linesNeeded := (pixelHeight + 15) / 16
+	return buf.String() + strings.Repeat("\n", linesNeeded), nil
+}
+
+// FetchSixelImage downloads an image and encodes it to Sixel format fit to max width/height characters.
+func FetchSixelImage(imageURL string, maxCharWidth, maxCharHeight int) (string, error) {
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image: %d", resp.StatusCode)
+	}
+
+	img, _, err := image.Decode(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	bounds := img.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return "", fmt.Errorf("invalid image dimensions")
+	}
+
+	// Calculate target size
+	pixelWidth := maxCharWidth * 8
+	pixelHeight := (h * pixelWidth) / w
+	
+	maxPixelHeight := maxCharHeight * 16
+	if pixelHeight > maxPixelHeight {
+		pixelHeight = maxPixelHeight
+		pixelWidth = (w * pixelHeight) / h
+	}
+
+	resized := resizeImage(img, pixelWidth, pixelHeight)
+
+	var buf bytes.Buffer
+	enc := sixel.NewEncoder(&buf)
+	err = enc.Encode(resized)
+	if err != nil {
+		return "", err
+	}
+
+	linesNeeded := (pixelHeight + 15) / 16
+	return buf.String() + strings.Repeat("\n", linesNeeded), nil
 }

@@ -27,6 +27,7 @@ const (
 	focusOutline
 	focusReader
 	focusFollow
+	focusGallery
 )
 
 type sidebarTabState int
@@ -43,6 +44,7 @@ type articleContentMsg struct {
 	Text    string
 	Links   []ArticleLink
 	Headers []WikiHeader
+	Images  []ArticleImage
 }
 type wikiLandingMsg struct {
 	ThemeColor lipgloss.Color
@@ -50,6 +52,8 @@ type wikiLandingMsg struct {
 	Links      []ArticleLink
 	Headers    []WikiHeader
 	Title      string
+	LogoSixel  string
+	Images     []ArticleImage
 }
 
 func searchArticlesCmd(wiki, query string) tea.Cmd {
@@ -68,8 +72,8 @@ func fetchArticleCmd(wiki, title string, themeColor lipgloss.Color) tea.Cmd {
 		if err != nil {
 			return errMsg(err)
 		}
-		cleaned, links, headers := CleanHTML(html, themeColor)
-		return articleContentMsg{Text: cleaned, Links: links, Headers: headers}
+		cleaned, links, headers, images := CleanHTML(html, themeColor)
+		return articleContentMsg{Text: cleaned, Links: links, Headers: headers, Images: images}
 	}
 }
 
@@ -77,6 +81,7 @@ func fetchWikiLandingCmd(wiki string) tea.Cmd {
 	return func() tea.Msg {
 		logo, mainPage, err := FetchWikiSiteDetails(wiki)
 		var themeColor lipgloss.Color
+		var logoSixel string
 		if err != nil {
 			themeColor = getAccentColor(wiki)
 			mainPage = "Main Page"
@@ -87,6 +92,8 @@ func fetchWikiLandingCmd(wiki string) tea.Cmd {
 			} else {
 				themeColor = lipgloss.Color(hex)
 			}
+			// Fetch Sixel logo
+			logoSixel, _ = FetchSixelLogo(logo)
 		}
 
 		html, err := FetchArticleContent(wiki, mainPage)
@@ -97,16 +104,20 @@ func fetchWikiLandingCmd(wiki string) tea.Cmd {
 				Links:      nil,
 				Headers:    nil,
 				Title:      "Main Page",
+				LogoSixel:  logoSixel,
+				Images:     nil,
 			}
 		}
 
-		cleaned, links, headers := CleanHTML(html, themeColor)
+		cleaned, links, headers, images := CleanHTML(html, themeColor)
 		return wikiLandingMsg{
 			ThemeColor: themeColor,
 			Text:       cleaned,
 			Links:      links,
 			Headers:    headers,
 			Title:      mainPage,
+			LogoSixel:  logoSixel,
+			Images:     images,
 		}
 	}
 }
@@ -143,6 +154,28 @@ type model struct {
 	// History stack
 	history      []string
 	currentTitle string
+
+	// Sixel logo string & line count
+	logoSixel string
+	logoLines int
+
+	// Gallery viewer state
+	articleImages     []ArticleImage
+	imageIndex        int
+	currentImageSixel string
+	imageLoading      bool
+}
+
+type imageSixelMsg string
+
+func fetchSixelImageCmd(imageURL string, width, height int) tea.Cmd {
+	return func() tea.Msg {
+		sixelStr, err := FetchSixelImage(imageURL, width, height)
+		if err != nil {
+			return imageSixelMsg("")
+		}
+		return imageSixelMsg(sixelStr)
+	}
 }
 
 func initialModel() model {
@@ -262,8 +295,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Type == tea.MouseRelease && msg.Button == tea.MouseButtonLeft {
 				if !m.hideSidebar && msg.X >= 1 && msg.X <= 31 {
 					if m.sidebarTab == tabSearch {
-						// Search results list starts at terminal line 13
-						clickedIndex := msg.Y - 13
+						// Search results list starts at terminal line 13 + logo lines
+						clickedIndex := msg.Y - (13 + m.logoLines)
 						if clickedIndex >= 0 && clickedIndex < len(m.searchResults) && !m.loading {
 							m.cursor = clickedIndex
 							m.focus = focusList
@@ -277,8 +310,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							cmds = append(cmds, fetchArticleCmd(m.wiki, selected, m.themeColor))
 						}
 					} else {
-						// Outline list starts at terminal line 11
-						clickedIndex := msg.Y - 11
+						// Outline list starts at terminal line 11 + logo lines
+						clickedIndex := msg.Y - (11 + m.logoLines)
 						if clickedIndex >= 0 && clickedIndex < len(m.headers) {
 							m.outlineCursor = clickedIndex
 							m.focus = focusOutline
@@ -430,7 +463,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = rightWidth
 		m.viewport.Height = contentHeight
 		
-		if m.inReaderMode {
+		if m.focus == focusGallery && len(m.articleImages) > 0 {
+			m.imageLoading = true
+			m.currentImageSixel = ""
+			return m, fetchSixelImageCmd(m.articleImages[m.imageIndex].URL, rightWidth-4, contentHeight-4)
+		} else if m.inReaderMode {
 			wrapped := lipgloss.NewStyle().Width(rightWidth).Render(m.articleRawText)
 			m.viewport.SetContent(wrapped)
 		}
@@ -446,6 +483,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outlineCursor = 0
 		m.currentTitle = msg.Title
 		m.history = nil
+		m.logoSixel = msg.LogoSixel
+		m.logoLines = strings.Count(m.logoSixel, "\n")
+		m.articleImages = msg.Images
 		m.inReaderMode = true
 		
 		wrappedWidth := m.viewport.Width
@@ -478,6 +518,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.articleLinks = msg.Links
 		m.headers = msg.Headers
 		m.outlineCursor = 0
+		m.articleImages = msg.Images
 		m.inReaderMode = true
 		
 		wrappedWidth := m.viewport.Width
@@ -489,6 +530,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(wrapped)
 		m.viewport.YOffset = 0
 		m.focus = focusReader
+		return m, nil
+
+	case imageSixelMsg:
+		m.imageLoading = false
+		m.currentImageSixel = string(msg)
+		if m.currentImageSixel == "" {
+			m.currentImageSixel = "\n  [Failed to load image. Press n/p or Arrow keys to try another]"
+		}
+		m.viewport.SetContent(m.currentImageSixel)
+		m.viewport.YOffset = 0
 		return m, nil
 
 	case errMsg:
@@ -645,6 +696,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "G":
 				m.viewport.GotoBottom()
 				return m, nil
+			case "i":
+				if m.inReaderMode && len(m.articleImages) > 0 {
+					m.focus = focusGallery
+					m.imageIndex = 0
+					m.currentImageSixel = ""
+					m.imageLoading = true
+					return m, fetchSixelImageCmd(m.articleImages[m.imageIndex].URL, m.viewport.Width-4, m.viewport.Height-4)
+				}
 			}
 		}
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -694,6 +753,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if !anyPrefix {
 						m.followInput.Reset()
 					}
+				}
+			}
+		}
+
+	case focusGallery:
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "escape", "i", "q":
+				m.focus = focusReader
+				wrappedWidth := m.viewport.Width
+				if wrappedWidth < 10 {
+					wrappedWidth = 10
+				}
+				wrapped := lipgloss.NewStyle().Width(wrappedWidth).Render(m.articleRawText)
+				m.viewport.SetContent(wrapped)
+				m.viewport.YOffset = 0
+				return m, nil
+			case "right", "j", "n":
+				if len(m.articleImages) > 0 {
+					m.imageIndex = (m.imageIndex + 1) % len(m.articleImages)
+					m.currentImageSixel = ""
+					m.imageLoading = true
+					return m, fetchSixelImageCmd(m.articleImages[m.imageIndex].URL, m.viewport.Width-4, m.viewport.Height-4)
+				}
+			case "left", "k", "p":
+				if len(m.articleImages) > 0 {
+					m.imageIndex = (m.imageIndex - 1 + len(m.articleImages)) % len(m.articleImages)
+					m.currentImageSixel = ""
+					m.imageLoading = true
+					return m, fetchSixelImageCmd(m.articleImages[m.imageIndex].URL, m.viewport.Width-4, m.viewport.Height-4)
 				}
 			}
 		}
@@ -814,6 +903,10 @@ func (m model) View() string {
 	if !m.hideSidebar {
 		var leftContent string
 		
+		if m.logoSixel != "" {
+			leftContent += m.logoSixel
+		}
+
 		// Draw tabs at the top of the sidebar
 		var searchTabStr, outlineTabStr string
 		if m.sidebarTab == tabSearch {
@@ -898,11 +991,11 @@ func (m model) View() string {
 		}
 	}
 
-	// Right Pane (Reader)
+	// Right Pane (Reader or Gallery)
 	var rightView string
 	rightContent := m.viewport.View()
 	
-	if m.focus == focusReader {
+	if m.focus == focusReader || m.focus == focusGallery {
 		rightView = borderActive.Width(m.viewport.Width).Height(m.viewport.Height).Render(rightContent)
 	} else {
 		rightView = borderInactive.Width(m.viewport.Width).Height(m.viewport.Height).Render(rightContent)
@@ -930,13 +1023,27 @@ func (m model) View() string {
 		if len(m.history) > 0 {
 			backHelp = "Ctrl+O: Back • "
 		}
+		galleryHelp := ""
+		if len(m.articleImages) > 0 {
+			galleryHelp = fmt.Sprintf("i: Gallery (%d imgs) • ", len(m.articleImages))
+		}
 		if m.hideSidebar {
-			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %sCtrl+B: Show Sidebar • Ctrl+C: Quit", backHelp)
+			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %s%sCtrl+B: Show Sidebar • Ctrl+C: Quit", galleryHelp, backHelp)
 		} else {
-			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %sEsc: Sidebar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Sidebar", backHelp)
+			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %s%sEsc: Sidebar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Sidebar", galleryHelp, backHelp)
 		}
 	case focusFollow:
 		helpText = m.followInput.View() + " [Esc: Cancel]"
+	case focusGallery:
+		caption := "Image"
+		if len(m.articleImages) > 0 && m.imageIndex < len(m.articleImages) {
+			caption = m.articleImages[m.imageIndex].Caption
+		}
+		loadingStr := ""
+		if m.imageLoading {
+			loadingStr = " [Loading...] "
+		}
+		helpText = fmt.Sprintf("Gallery: [Image %d of %d] %s%s • j/k (or Left/Right or n/p): Prev/Next • Esc / i: Return to Article", m.imageIndex+1, len(m.articleImages), loadingStr, caption)
 	}
 	footer := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6C7086")).

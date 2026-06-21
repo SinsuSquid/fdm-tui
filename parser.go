@@ -16,12 +16,24 @@ type ArticleLink struct {
 	Target string
 }
 
+// ArticleImage represents an image found in the article content
+type ArticleImage struct {
+	URL     string
+	Caption string
+}
+
 var (
 	// Tags to discard entirely along with their content
 	tagsToDiscard = []string{"script", "style", "noscript", "table", "aside"}
 
 	// Regexp to extract internal links
 	linkRegex = regexp.MustCompile(`(?i)<a[^>]*href="/wiki/([^"?#]+)"[^>]*>(.*?)</a>`)
+
+	// Regexes to extract images
+	imgTagRegex  = regexp.MustCompile(`(?i)<img\s+[^>]*>`)
+	srcRegex     = regexp.MustCompile(`(?i)src="([^"]+)"`)
+	dataSrcRegex = regexp.MustCompile(`(?i)data-src="([^"]+)"`)
+	altRegex     = regexp.MustCompile(`(?i)alt="([^"]+)"`)
 )
 
 // stripHTML is a robust state-based HTML tag stripper.
@@ -103,11 +115,57 @@ func extractHeaders(rawHTML string) []WikiHeader {
 	return headers
 }
 
+func extractImages(rawHTML string) []ArticleImage {
+	var images []ArticleImage
+	imgTags := imgTagRegex.FindAllString(rawHTML, -1)
+	for _, tag := range imgTags {
+		urlStr := ""
+		if m := dataSrcRegex.FindStringSubmatch(tag); len(m) > 1 {
+			urlStr = m[1]
+		} else if m := srcRegex.FindStringSubmatch(tag); len(m) > 1 {
+			urlStr = m[1]
+		}
+		
+		if urlStr == "" || strings.Contains(urlStr, "tracking") || strings.Contains(urlStr, "transparent.gif") || strings.Contains(urlStr, "sprite") {
+			continue
+		}
+		
+		caption := ""
+		if m := altRegex.FindStringSubmatch(tag); len(m) > 1 {
+			caption = html.UnescapeString(m[1])
+		}
+		if caption == "" {
+			caption = "Image"
+		}
+		
+		// Remove size constraints in url to get high res if possible
+		if idx := strings.Index(urlStr, "/scale-to-width-down/"); idx != -1 {
+			urlStr = urlStr[:idx]
+		}
+		
+		dup := false
+		for _, img := range images {
+			if img.URL == urlStr {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			images = append(images, ArticleImage{
+				URL:     urlStr,
+				Caption: caption,
+			})
+		}
+	}
+	return images
+}
+
 // CleanHTML converts raw wiki HTML into readable plaintext formatted for the terminal,
-// extracts all internal links, and extracts header outlines.
-func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink, []WikiHeader) {
+// extracts all internal links, extracts header outlines, and extracts images.
+func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink, []WikiHeader, []ArticleImage) {
 	// Extract outline headers before modifying HTML
 	headers := extractHeaders(rawHTML)
+	images := extractImages(rawHTML)
 
 	// 1. Remove comments
 	commentRegex := regexp.MustCompile(`(?s)`)
@@ -278,5 +336,5 @@ func CleanHTML(rawHTML string, themeColor lipgloss.Color) (string, []ArticleLink
 		}
 	}
 
-	return strings.TrimSpace(strings.Join(cleanedLines, "\n")), links, headers
+	return strings.TrimSpace(strings.Join(cleanedLines, "\n")), links, headers, images
 }
