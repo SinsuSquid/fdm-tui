@@ -178,6 +178,15 @@ func fetchSixelImageCmd(imageURL string, width, height int) tea.Cmd {
 	}
 }
 
+func clearKittyGraphicsCmd() tea.Cmd {
+	return func() tea.Msg {
+		if isKittyTerminal() {
+			os.Stdout.Write([]byte("\x1b_Ga=d,d=a\x1b\\"))
+		}
+		return nil
+	}
+}
+
 func initialModel() model {
 	wi := textinput.New()
 	wi.Placeholder = "genshin-impact"
@@ -769,7 +778,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				wrapped := lipgloss.NewStyle().Width(wrappedWidth).Render(m.articleRawText)
 				m.viewport.SetContent(wrapped)
 				m.viewport.YOffset = 0
-				return m, nil
+				return m, clearKittyGraphicsCmd()
 			case "right", "j", "n":
 				if len(m.articleImages) > 0 {
 					m.imageIndex = (m.imageIndex + 1) % len(m.articleImages)

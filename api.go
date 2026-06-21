@@ -263,6 +263,8 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
 
 	var result strings.Builder
+	// Clear all previous Kitty graphics from the terminal screen
+	result.WriteString("\x1b_Ga=d,d=a\x1b\\")
 	chunkSize := 4096
 	totalLen := len(encoded)
 
