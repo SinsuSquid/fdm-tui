@@ -2,17 +2,19 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	_ "golang.org/x/image/webp"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"github.com/mattn/go-sixel"
 )
@@ -227,7 +229,93 @@ func resizeImage(img image.Image, width, height int) image.Image {
 	return newImg
 }
 
-// FetchSixelLogo downloads the logo and encodes it to Sixel format, padded with newlines to reserve TUI layout rows.
+func isKittyTerminal() bool {
+	return os.Getenv("KITTY_WINDOW_ID") != "" ||
+		strings.Contains(strings.ToLower(os.Getenv("TERM")), "kitty") ||
+		os.Getenv("TERM_PROGRAM") == "WezTerm"
+}
+
+func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
+	bounds := img.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return ""
+	}
+
+	pixelWidth := maxCols * 8
+	pixelHeight := (h * pixelWidth) / w
+	
+	maxPixelHeight := maxRows * 16
+	if pixelHeight > maxPixelHeight {
+		pixelHeight = maxPixelHeight
+		pixelWidth = (w * pixelHeight) / h
+	}
+
+	resized := resizeImage(img, pixelWidth, pixelHeight)
+
+	var buf bytes.Buffer
+	err := png.Encode(&buf, resized)
+	if err != nil {
+		return ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	var result strings.Builder
+	chunkSize := 4096
+	totalLen := len(encoded)
+
+	for i := 0; i < totalLen; i += chunkSize {
+		end := i + chunkSize
+		more := 1
+		if end >= totalLen {
+			end = totalLen
+			more = 0
+		}
+		chunk := encoded[i:end]
+		if i == 0 {
+			result.WriteString(fmt.Sprintf("\x1b_Ga=T,f=100,q=2,m=%d;%s\x1b\\", more, chunk))
+		} else {
+			result.WriteString(fmt.Sprintf("\x1b_Gm=%d;%s\x1b\\", more, chunk))
+		}
+	}
+
+	linesNeeded := (pixelHeight + 15) / 16
+	return result.String() + strings.Repeat("\n", linesNeeded)
+}
+
+func renderSixelGraphics(img image.Image, maxCols, maxRows int) (string, error) {
+	bounds := img.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return "", fmt.Errorf("invalid image dimensions")
+	}
+
+	pixelWidth := maxCols * 8
+	pixelHeight := (h * pixelWidth) / w
+	
+	maxPixelHeight := maxRows * 16
+	if pixelHeight > maxPixelHeight {
+		pixelHeight = maxPixelHeight
+		pixelWidth = (w * pixelHeight) / h
+	}
+
+	resized := resizeImage(img, pixelWidth, pixelHeight)
+
+	var buf bytes.Buffer
+	enc := sixel.NewEncoder(&buf)
+	err := enc.Encode(resized)
+	if err != nil {
+		return "", err
+	}
+
+	linesNeeded := (pixelHeight + 15) / 16
+	return buf.String() + strings.Repeat("\n", linesNeeded), nil
+}
+
+// FetchSixelLogo downloads the logo and encodes it using the best graphics protocol (Kitty or Sixel).
 func FetchSixelLogo(logoURL string) (string, error) {
 	resp, err := http.Get(logoURL)
 	if err != nil {
@@ -244,39 +332,14 @@ func FetchSixelLogo(logoURL string) (string, error) {
 		return "", err
 	}
 
-	bounds := img.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-	if w <= 0 || h <= 0 {
-		return "", fmt.Errorf("invalid image dimensions")
-	}
-
 	// Fit inside sidebar pane (typically 30 chars wide, let's use 24 chars max)
-	// Assume 1 cell = 8x16 pixels
-	charWidth := 24
-	pixelWidth := charWidth * 8
-	pixelHeight := (h * pixelWidth) / w
-	
-	// Limit height so it doesn't occupy too much space
-	if pixelHeight > 96 {
-		pixelHeight = 96
-		pixelWidth = (w * pixelHeight) / h
+	if isKittyTerminal() {
+		return renderKittyGraphics(img, 24, 6), nil
 	}
-
-	resized := resizeImage(img, pixelWidth, pixelHeight)
-
-	var buf bytes.Buffer
-	enc := sixel.NewEncoder(&buf)
-	err = enc.Encode(resized)
-	if err != nil {
-		return "", err
-	}
-
-	linesNeeded := (pixelHeight + 15) / 16
-	return buf.String() + strings.Repeat("\n", linesNeeded), nil
+	return renderSixelGraphics(img, 24, 6)
 }
 
-// FetchSixelImage downloads an image and encodes it to Sixel format fit to max width/height characters.
+// FetchSixelImage downloads an image and encodes it to Sixel/Kitty graphics format fit to max width/height characters.
 func FetchSixelImage(imageURL string, maxCharWidth, maxCharHeight int) (string, error) {
 	resp, err := http.Get(imageURL)
 	if err != nil {
@@ -293,32 +356,8 @@ func FetchSixelImage(imageURL string, maxCharWidth, maxCharHeight int) (string, 
 		return "", err
 	}
 
-	bounds := img.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-	if w <= 0 || h <= 0 {
-		return "", fmt.Errorf("invalid image dimensions")
+	if isKittyTerminal() {
+		return renderKittyGraphics(img, maxCharWidth, maxCharHeight), nil
 	}
-
-	// Calculate target size
-	pixelWidth := maxCharWidth * 8
-	pixelHeight := (h * pixelWidth) / w
-	
-	maxPixelHeight := maxCharHeight * 16
-	if pixelHeight > maxPixelHeight {
-		pixelHeight = maxPixelHeight
-		pixelWidth = (w * pixelHeight) / h
-	}
-
-	resized := resizeImage(img, pixelWidth, pixelHeight)
-
-	var buf bytes.Buffer
-	enc := sixel.NewEncoder(&buf)
-	err = enc.Encode(resized)
-	if err != nil {
-		return "", err
-	}
-
-	linesNeeded := (pixelHeight + 15) / 16
-	return buf.String() + strings.Repeat("\n", linesNeeded), nil
+	return renderSixelGraphics(img, maxCharWidth, maxCharHeight)
 }

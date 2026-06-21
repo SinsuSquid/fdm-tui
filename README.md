@@ -34,7 +34,7 @@ Designed specifically to bypass your boss's line of sight. Looking at gaming wik
 - **Vimium-style Link Hinting**: Links in articles are labeled with alphabetical hints (e.g. `[a]`, `[b]`, `[as]`). Press `f` to activate the hinting prompt, then type the letters to jump directly between pages without needing the mouse.
 - **Article Navigation History**: Remembers your reading path. Press `Ctrl+O`, `Backspace`, or `H` while in the reader to jump back to previously viewed articles.
 - **Article Outline (Table of Contents)**: Automatically extracts article sections and lists them in a dedicated outline view. Press `Ctrl+T` to switch the sidebar tab and scroll straight to a section by selecting it.
-- **On-Demand Image Gallery**: Extracts all image files from the active article and renders them inside the terminal viewport using the Sixel graphics protocol. Toggle it with `i`. Includes built-in support for WebP decoding.
+- **On-Demand Image Gallery**: Extracts all image files from the active article and renders them inside the terminal viewport. Supports both high-resolution **Kitty Graphics Protocol** and **Sixel graphics protocol** with automatic terminal detection. Toggle it with `i`. Includes built-in support for WebP decoding.
 - **Vim Navigation**: Full support for `j`/`k` (scroll), `d`/`u` (half-page), and `g`/`G` (top/bottom) keybindings.
 - **Mouse & Scroll Wheel**: Click sidebar items or outline sections to navigate, and use your mouse scroll wheel directly inside the terminal to scroll articles.
 - **AltScreen Buffer**: Runs in fullscreen alternate screen buffer mode (doesn't clutter your terminal history).
