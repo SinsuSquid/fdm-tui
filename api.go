@@ -266,6 +266,7 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 	chunkSize := 4096
 	totalLen := len(encoded)
 
+	linesNeeded := (pixelHeight + 15) / 16
 	for i := 0; i < totalLen; i += chunkSize {
 		end := i + chunkSize
 		more := 1
@@ -275,13 +276,12 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 		}
 		chunk := encoded[i:end]
 		if i == 0 {
-			result.WriteString(fmt.Sprintf("\x1b_Ga=T,f=100,q=2,m=%d;%s\x1b\\", more, chunk))
+			result.WriteString(fmt.Sprintf("\x1b_Ga=T,f=100,q=2,c=%d,r=%d,m=%d;%s\x1b\\", maxCols, linesNeeded, more, chunk))
 		} else {
 			result.WriteString(fmt.Sprintf("\x1b_Gm=%d;%s\x1b\\", more, chunk))
 		}
 	}
 
-	linesNeeded := (pixelHeight + 15) / 16
 	return result.String() + strings.Repeat("\n", linesNeeded)
 }
 
