@@ -164,6 +164,7 @@ type model struct {
 	imageIndex        int
 	currentImageSixel string
 	imageLoading      bool
+	showLogo          bool // Only show logo in sidebar when requested
 }
 
 type imageSixelMsg string
@@ -182,6 +183,42 @@ func clearKittyGraphicsCmd() tea.Cmd {
 	return func() tea.Msg {
 		if isKittyTerminal() {
 			os.Stdout.Write([]byte("\x1b_Ga=d,d=A\x1b\\"))
+		}
+		return nil
+	}
+}
+
+func (m model) getGalleryImagePos() (int, int) {
+	y := 5
+	x := 2
+	if !m.hideSidebar {
+		x = 33
+	}
+	return x, y
+}
+
+func drawGraphicsCmd(m model) tea.Cmd {
+	return func() tea.Msg {
+		var sb strings.Builder
+
+		// 1. Clear all previous graphics if using Kitty
+		if isKittyTerminal() {
+			sb.WriteString("\x1b_Ga=d,d=A\x1b\\")
+		}
+
+		// 2. Draw logo if showLogo is true and sidebar is visible and we have a logo
+		if m.state == stateDashboard && !m.hideSidebar && m.showLogo && m.logoSixel != "" {
+			sb.WriteString(fmt.Sprintf("\x1b[5;2H%s", m.logoSixel))
+		}
+
+		// 3. Draw gallery image if in gallery mode
+		if m.focus == focusGallery && m.currentImageSixel != "" {
+			x, y := m.getGalleryImagePos()
+			sb.WriteString(fmt.Sprintf("\x1b[%d;%dH%s", y, x, m.currentImageSixel))
+		}
+
+		if sb.Len() > 0 {
+			os.Stdout.Write([]byte(fmt.Sprintf("\x1b[s%s\x1b[u", sb.String())))
 		}
 		return nil
 	}
@@ -220,6 +257,7 @@ func initialModel() model {
 		themeColor:  lipgloss.Color("#A855F7"),
 		hideSidebar: false,
 		sidebarTab:  tabSearch,
+		showLogo:    false,
 	}
 }
 
@@ -305,9 +343,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if msg.Type == tea.MouseRelease && msg.Button == tea.MouseButtonLeft {
 				if !m.hideSidebar && msg.X >= 1 && msg.X <= 31 {
+					actualLogoLines := 0
+					if m.showLogo && m.logoSixel != "" {
+						actualLogoLines = m.logoLines
+					}
 					if m.sidebarTab == tabSearch {
 						// Search results list starts at terminal line 13 + logo lines
-						clickedIndex := msg.Y - (13 + m.logoLines)
+						clickedIndex := msg.Y - (13 + actualLogoLines)
 						if clickedIndex >= 0 && clickedIndex < len(m.searchResults) && !m.loading {
 							m.cursor = clickedIndex
 							m.focus = focusList
@@ -322,7 +364,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					} else {
 						// Outline list starts at terminal line 11 + logo lines
-						clickedIndex := msg.Y - (11 + m.logoLines)
+						clickedIndex := msg.Y - (11 + actualLogoLines)
 						if clickedIndex >= 0 && clickedIndex < len(m.headers) {
 							m.outlineCursor = clickedIndex
 							m.focus = focusOutline
@@ -377,7 +419,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.searchInput.Blur()
 					m.focus = focusReader
 				}
-				return m, nil
+				return m, drawGraphicsCmd(m)
+			}
+		case "ctrl+l":
+			if m.state == stateDashboard {
+				m.showLogo = !m.showLogo
+				return m, drawGraphicsCmd(m)
 			}
 		case "ctrl+t":
 			if m.state == stateDashboard && !m.hideSidebar {
@@ -483,7 +530,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(wrapped)
 		}
 		
-		return m, nil
+		return m, drawGraphicsCmd(m)
 
 	case wikiLandingMsg:
 		m.loading = false
@@ -496,6 +543,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history = nil
 		m.logoSixel = msg.LogoSixel
 		m.logoLines = strings.Count(m.logoSixel, "\n")
+		if m.logoLines == 0 && m.logoSixel != "" {
+			m.logoLines = 6
+		}
 		m.articleImages = msg.Images
 		m.inReaderMode = true
 		
@@ -509,7 +559,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		m.focus = focusReader
 		m.searchInput.Blur()
-		return m, nil
+		return m, drawGraphicsCmd(m)
 
 	case searchResultMsg:
 		m.loading = false
@@ -541,17 +591,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(wrapped)
 		m.viewport.YOffset = 0
 		m.focus = focusReader
-		return m, nil
+		return m, drawGraphicsCmd(m)
 
 	case imageSixelMsg:
 		m.imageLoading = false
 		m.currentImageSixel = string(msg)
 		if m.currentImageSixel == "" {
-			m.currentImageSixel = "\n  [Failed to load image. Press n/p or Arrow keys to try another]"
+			m.viewport.SetContent("\n  [Failed to load image. Press n/p or Arrow keys to try another]")
+		} else {
+			// Reserve blank lines in viewport so text doesn't overlap
+			m.viewport.SetContent(strings.Repeat("\n", m.viewport.Height))
 		}
-		m.viewport.SetContent(m.currentImageSixel)
 		m.viewport.YOffset = 0
-		return m, nil
+		return m, drawGraphicsCmd(m)
 
 	case errMsg:
 		m.loading = false
@@ -780,7 +832,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				wrapped := lipgloss.NewStyle().Width(wrappedWidth).Render(m.articleRawText)
 				m.viewport.SetContent(wrapped)
 				m.viewport.YOffset = 0
-				return m, clearKittyGraphicsCmd()
+				return m, drawGraphicsCmd(m)
 			case "right", "j", "n":
 				if len(m.articleImages) > 0 {
 					m.imageIndex = (m.imageIndex + 1) % len(m.articleImages)
@@ -914,8 +966,8 @@ func (m model) View() string {
 	if !m.hideSidebar {
 		var leftContent string
 		
-		if m.logoSixel != "" {
-			leftContent += m.logoSixel
+		if m.showLogo && m.logoSixel != "" {
+			leftContent += strings.Repeat("\n", m.logoLines)
 		}
 
 		// Draw tabs at the top of the sidebar
@@ -1024,11 +1076,11 @@ func (m model) View() string {
 	var helpText string
 	switch m.focus {
 	case focusSearch:
-		helpText = "Enter: Search Wiki • Ctrl+T: Toggle Tab • Ctrl+B: Toggle Sidebar • Ctrl+W: Change Wiki • Tab: Focus Reader • Ctrl+C: Quit"
+		helpText = "Enter: Search Wiki • Ctrl+L: Toggle Logo • Ctrl+T: Toggle Tab • Ctrl+B: Toggle Sidebar • Ctrl+W: Change Wiki • Tab: Focus Reader • Ctrl+C: Quit"
 	case focusList:
-		helpText = "j/k: Navigate • Enter: Open • Esc: Search Bar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Reader"
+		helpText = "j/k: Navigate • Enter: Open • Esc: Search Bar • Ctrl+L: Toggle Logo • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Reader"
 	case focusOutline:
-		helpText = "j/k: Navigate • Enter: Scroll To • Esc: Search Bar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Reader"
+		helpText = "j/k: Navigate • Enter: Scroll To • Esc: Search Bar • Ctrl+L: Toggle Logo • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Reader"
 	case focusReader:
 		backHelp := ""
 		if len(m.history) > 0 {
@@ -1041,7 +1093,7 @@ func (m model) View() string {
 		if m.hideSidebar {
 			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %s%sCtrl+B: Show Sidebar • Ctrl+C: Quit", galleryHelp, backHelp)
 		} else {
-			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %s%sEsc: Sidebar • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Sidebar", galleryHelp, backHelp)
+			helpText = fmt.Sprintf("j/k: Scroll • d/u: Half-Page • g/G: Top/Bottom • f: Follow Link • %s%sEsc: Sidebar • Ctrl+L: Toggle Logo • Ctrl+T: Toggle Tab • Ctrl+B: Hide Sidebar • Tab: Focus Sidebar", galleryHelp, backHelp)
 		}
 	case focusFollow:
 		helpText = m.followInput.View() + " [Esc: Cancel]"

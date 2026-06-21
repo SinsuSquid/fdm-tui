@@ -31,6 +31,7 @@ Designed specifically to bypass your boss's line of sight. Looking at gaming wik
 ## ✨ Features
 
 - **Dynamic Accent Themes**: The interface automatically fetches the wiki's logo, analyzes its pixels, and shifts the color scheme in real-time to match the community's visual identity.
+- **On-Demand Logo Rendering**: To maintain a stealthy, low-profile layout, the wiki logo is hidden by default. Press `Ctrl+L` to toggle the logo inside the sidebar.
 - **Vimium-style Link Hinting**: Links in articles are labeled with alphabetical hints (e.g. `[a]`, `[b]`, `[as]`). Press `f` to activate the hinting prompt, then type the letters to jump directly between pages without needing the mouse.
 - **Article Navigation History**: Remembers your reading path. Press `Ctrl+O`, `Backspace`, or `H` while in the reader to jump back to previously viewed articles.
 - **Article Outline (Table of Contents)**: Automatically extracts article sections and lists them in a dedicated outline view. Press `Ctrl+T` to switch the sidebar tab and scroll straight to a section by selecting it.
@@ -73,6 +74,7 @@ go build -o fdm-tui
 ### Main Dashboard (General)
 - `Tab`: Cycle focus between active sidebar element and the Article Reader.
 - `Ctrl+B`: Toggle (Show/Hide) the left sidebar.
+- `Ctrl+L`: Toggle (Show/Hide) the wiki logo in the sidebar.
 - `Ctrl+T`: Toggle sidebar tab (Search vs Article Outline).
 - `Ctrl+W`: Return to the Welcome Screen to change the active Wiki.
 - `Ctrl+C`: Quit the application.

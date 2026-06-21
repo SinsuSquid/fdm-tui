@@ -263,12 +263,9 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
 
 	var result strings.Builder
-	// Clear all previous Kitty graphics from the terminal screen
-	result.WriteString("\x1b_Ga=d,d=A\x1b\\")
 	chunkSize := 4096
 	totalLen := len(encoded)
 
-	linesNeeded := (pixelHeight + 15) / 16
 	for i := 0; i < totalLen; i += chunkSize {
 		end := i + chunkSize
 		more := 1
@@ -284,7 +281,7 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 		}
 	}
 
-	return result.String() + strings.Repeat("\n", linesNeeded)
+	return result.String()
 }
 
 func renderSixelGraphics(img image.Image, maxCols, maxRows int) (string, error) {
@@ -313,8 +310,7 @@ func renderSixelGraphics(img image.Image, maxCols, maxRows int) (string, error) 
 		return "", err
 	}
 
-	linesNeeded := (pixelHeight + 15) / 16
-	return buf.String() + strings.Repeat("\n", linesNeeded), nil
+	return buf.String(), nil
 }
 
 // FetchSixelLogo downloads the logo and encodes it using the best graphics protocol (Kitty or Sixel).
