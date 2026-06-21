@@ -278,7 +278,7 @@ func renderKittyGraphics(img image.Image, maxCols, maxRows int) string {
 		}
 		chunk := encoded[i:end]
 		if i == 0 {
-			result.WriteString(fmt.Sprintf("\x1b_Ga=T,f=100,q=2,c=%d,r=%d,m=%d;%s\x1b\\", maxCols, linesNeeded, more, chunk))
+			result.WriteString(fmt.Sprintf("\x1b_Ga=T,f=100,q=2,c=%d,m=%d;%s\x1b\\", maxCols, more, chunk))
 		} else {
 			result.WriteString(fmt.Sprintf("\x1b_Gm=%d;%s\x1b\\", more, chunk))
 		}
